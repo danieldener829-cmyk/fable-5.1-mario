@@ -1,22 +1,37 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Super Mario 1-1</title>
+<title>Super Mario 1-1 — Escolha a Roupa!</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:monospace;color:#fff}
   #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column}
   canvas{image-rendering:pixelated;image-rendering:crisp-edges;background:#5c94fc}
-  #help{position:fixed;bottom:8px;left:0;right:0;text-align:center;font-size:12px;color:#aaa;user-select:none}
+  #help{position:fixed;bottom:8px;left:0;right:0;text-align:center;font-size:12px;color:#aaa;user-select:none;padding:0 8px}
   #touch{position:fixed;inset:0;display:none;pointer-events:none}
   .tb{position:absolute;bottom:18px;width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.18);border:2px solid rgba(255,255,255,.4);pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff}
   @media (pointer:coarse){#touch{display:block}#help{display:none}}
+  #outfit{position:fixed;left:0;right:0;bottom:32px;display:none;justify-content:center;align-items:center;gap:10px;z-index:10;pointer-events:none}
+  #outfit.show{display:flex}
+  #outfit button{pointer-events:auto;width:44px;height:36px;font-size:18px;font-family:monospace;background:#222;border:2px solid #fff;border-radius:8px;color:#fff;cursor:pointer}
+  #outfit button:active{transform:scale(.93);background:#444}
+  #obox{pointer-events:auto;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.72);border:2px solid #fff;border-radius:10px;padding:6px 12px;cursor:pointer;user-select:none}
+  #odot{width:18px;height:18px;border-radius:50%;border:2px solid #fff;background:#d82800}
+  #oname{font-size:14px;min-width:86px;text-align:center}
+  #onum{font-size:11px;color:#f8d838}
+  @media (pointer:coarse){#outfit{bottom:104px}}
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="c" width="256" height="240"></canvas></div>
-<div id="help">← → 이동 · Z / Shift 달리기(불꽃) · X / Space / ↑ 점프 · ↓ 앉기 · Enter 시작/일시정지 · M 음소거</div>
+<div id="outfit">
+  <button id="oprev" aria-label="Roupa anterior">◀</button>
+  <div id="obox" title="Clique para trocar de roupa"><span id="odot"></span><span id="oname">MARIO</span><span id="onum">1/7</span></div>
+  <div style="pointer-events:auto;display:flex;gap:6px" id="swatches"></div>
+  <button id="onext" aria-label="Próxima roupa">▶</button>
+</div>
+<div id="help">← → mover · X / Espaço / ↑ pular · Z / Shift correr-atirar · ↓ agachar · C trocar roupa · Enter começar/pausar · M som</div>
 <div id="touch">
   <div class="tb" data-k="left" style="left:16px">◀</div>
   <div class="tb" data-k="right" style="left:96px">▶</div>
@@ -53,6 +68,24 @@ const KEYMAP = {
 window.addEventListener('keydown', e => {
   if (e.code === 'Enter') { if (!e.repeat) pressed.start = true; e.preventDefault(); return; }
   if (e.code === 'KeyM') { if (!e.repeat) Audio.toggleMute(); return; }
+  // --- Troca de roupa: C alterna, 1-7 atalho, ← → na title screen ---
+  if (e.code === 'KeyC' && !e.repeat) {
+    e.preventDefault();
+    try { nextOutfit(1); } catch (err) {}
+    return;
+  }
+  if (/^Digit[1-7]$/.test(e.code) && !e.repeat) {
+    const n = parseInt(e.code.slice(5), 10) - 1;
+    e.preventDefault();
+    try { applyOutfit(n); Audio.sfx.coin(); } catch (err) {}
+    return;
+  }
+  try {
+    if (typeof Game !== 'undefined' && Game.state === 'title' && !e.repeat) {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); nextOutfit(-1); return; }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); nextOutfit(1); return; }
+    }
+  } catch (err) {}
   const k = KEYMAP[e.code];
   if (!k) return;
   e.preventDefault();
@@ -814,13 +847,66 @@ const PIPE_TOP = mkPipe(true), PIPE_BODY = mkPipe(false);
 
 const FIRE = { r: 'w', b: 'r' };          // fire mario palette swap
 const LUIGI1UP = { e: 'g', w: 'w' };      // 1-up mushroom
-function set(frames, sub) {
-  const R = frames.map(f => mk(f, PAL, sub));
+function set(frames, sub, pal) {
+  const P = pal || PAL;
+  const S = sub || {};
+  const R = frames.map(f => mk(f, P, S));
   return { R, L: R.map(flipH) };
 }
+// ---------------- Roupas do Mario (seletor de fantasia) ----------------
+// Troca a cor da camisa/chapéu ('r') e do macacão ('b'). O cabelo continua natural.
+const OUTFITS = [
+  { id: 'mario',  name: 'MARIO',  r: '#d82800', b: '#6b3400' },
+  { id: 'luigi',  name: 'LUIGI',  r: '#00a800', b: '#6b3400' },
+  { id: 'wario',  name: 'WARIO',  r: '#f8b800', b: '#6b3400' },
+  { id: 'azul',   name: 'AZUL',   r: '#0058f8', b: '#0a0a8c' },
+  { id: 'rosa',   name: 'ROSA',   r: '#f838b8', b: '#6b3400' },
+  { id: 'fogo',   name: 'FOGO',   r: '#f8f8f8', b: '#d82800' },
+  { id: 'sombra', name: 'SOMBRA', r: '#2a2a2a', b: '#000000' },
+];
+const SMALL_FRAMES = [SM_STAND, SM_WALK1, SM_WALK2, SM_WALK3, SM_JUMP, SM_SKID, SM_DIE];
+const BIG_FRAMES = [BIG_STAND, BIG_WALK1, BIG_WALK2, BIG_WALK3, BIG_JUMP, BIG_SKID, BIG_CROUCH];
+function outfitPal(i) {
+  const o = OUTFITS[i] || OUTFITS[0];
+  return Object.assign({}, PAL, { r: o.r, b: o.b });
+}
+let outfitIdx = 0;
+try {
+  const saved = parseInt(localStorage.getItem('fable-outfit') || '0', 10);
+  if (!isNaN(saved) && saved >= 0 && saved < OUTFITS.length) outfitIdx = saved;
+} catch (e) {}
+function applyOutfit(i, silent) {
+  outfitIdx = ((i % OUTFITS.length) + OUTFITS.length) % OUTFITS.length;
+  const pal = outfitPal(outfitIdx);
+  SPR.small = set(SMALL_FRAMES, null, pal);
+  SPR.big = set(BIG_FRAMES, null, pal);
+  // Fire Mario continua branco/vermelho clássico (legibilidade do power-up)
+  try { localStorage.setItem('fable-outfit', String(outfitIdx)); } catch (e) {}
+  updateOutfitUI();
+  if (!silent && typeof Audio !== 'undefined' && Audio.sfx) { try { Audio.unlock(); } catch (e) {} }
+}
+function nextOutfit(d) { applyOutfit(outfitIdx + (d || 1)); if (typeof Audio !== 'undefined') { try { Audio.sfx.coin(); } catch (e) {} } }
+function updateOutfitUI() {
+  const o = OUTFITS[outfitIdx];
+  const n = document.getElementById('oname'), d = document.getElementById('odot'), num = document.getElementById('onum');
+  if (n) n.textContent = o.name;
+  if (d) d.style.background = o.r;
+  if (num) num.textContent = (outfitIdx + 1) + '/' + OUTFITS.length;
+  const sw = document.getElementById('swatches');
+  if (sw && !sw.children.length) {
+    OUTFITS.forEach((oo, k) => {
+      const b = document.createElement('button');
+      b.title = oo.name; b.style.cssText = 'pointer-events:auto;width:22px;height:22px;border-radius:50%;border:2px solid #fff;background:' + oo.r + ';cursor:pointer;padding:0';
+      b.addEventListener('pointerdown', ev => { ev.stopPropagation(); ev.preventDefault(); applyOutfit(k); try { Audio.sfx.coin(); } catch (e) {} });
+      b.addEventListener('click', ev => ev.stopPropagation());
+      sw.appendChild(b);
+    });
+  }
+  if (sw) [...sw.children].forEach((b, k) => { b.style.outline = k === outfitIdx ? '2px solid #f8d838' : 'none'; });
+}
 const SPR = {
-  small: set([SM_STAND, SM_WALK1, SM_WALK2, SM_WALK3, SM_JUMP, SM_SKID, SM_DIE]),
-  big: set([BIG_STAND, BIG_WALK1, BIG_WALK2, BIG_WALK3, BIG_JUMP, BIG_SKID, BIG_CROUCH]),
+  small: set([SM_STAND, SM_WALK1, SM_WALK2, SM_WALK3, SM_JUMP, SM_SKID, SM_DIE], null, outfitPal(outfitIdx)),
+  big: set([BIG_STAND, BIG_WALK1, BIG_WALK2, BIG_WALK3, BIG_JUMP, BIG_SKID, BIG_CROUCH], null, outfitPal(outfitIdx)),
   fire: set([BIG_STAND, BIG_WALK1, BIG_WALK2, BIG_WALK3, BIG_JUMP, BIG_SKID, BIG_CROUCH], FIRE),
   goomba: set([GOOMBA1, GOOMBA_FLAT]),
   koopa: set([KOOPA1]),
@@ -1034,7 +1120,31 @@ function startLevel() {
 function setState(s) {
   if (s === 'title' || s === 'gameover') Game.best = Math.max(Game.best || 0, Game.score);
   Game.state = s; Game.stateT = 0; Game.running = (s === 'play');
+  // mostra o seletor de roupa só na title screen
+  try {
+    const bar = document.getElementById('outfit');
+    if (bar) bar.classList.toggle('show', s === 'title');
+    updateOutfitUI();
+  } catch (e) {}
 }
+// fiação dos botões do seletor (não deixa o clique começar o jogo)
+try {
+  const pv = document.getElementById('oprev'), nx = document.getElementById('onext'), bx = document.getElementById('obox');
+  if (pv) {
+    pv.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); nextOutfit(-1); });
+    pv.addEventListener('click', e => e.stopPropagation());
+  }
+  if (nx) {
+    nx.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); nextOutfit(1); });
+    nx.addEventListener('click', e => e.stopPropagation());
+  }
+  if (bx) {
+    bx.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); nextOutfit(1); });
+    bx.addEventListener('click', e => e.stopPropagation());
+  }
+  updateOutfitUI();
+  document.getElementById('outfit').classList.add('show');
+} catch (e) {}
 function addScore(n, x, y) {
   Game.score += n;
   if (x !== undefined) Game.popups.push({ x, y, t: 0, text: String(n) });
@@ -1605,9 +1715,28 @@ function render() {
     w = ctx.measureText('MARIO BROS.').width; ctx.fillText('MARIO BROS.', (W - w) / 2, 64);
     centerText('WORLD 1-1  REMAKE', 84, '#f8d838');
     ctx.drawImage(SPR.small.R[0], 40, 13 * T - 16);
-    if ((Game.frame >> 5) & 1) centerText('PRESS ENTER / TAP TO START', 140, '#fff');
-    centerText('Z:RUN/FIRE  X:JUMP  ARROWS:MOVE', 160, '#fff');
-    centerText('TOP- ' + pad(Game.best || 0, 6), 184, '#fff');
+    // --- Seletor de roupa (canvas) ---
+    try {
+      const o = OUTFITS[outfitIdx];
+      ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.fillRect(52, 106, 152, 40);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(52.5, 106.5, 151, 39);
+      const pv = SPR.small.R[1 + ((Game.frame >> 4) % 3)];
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(pv, 60, 110, 16, 22);
+      ctx.font = '8px monospace'; ctx.fillStyle = '#f8d838'; ctx.textBaseline = 'top';
+      ctx.fillText('< ' + o.name + ' >', 82, 110);
+      ctx.fillStyle = '#fff'; ctx.font = '7px monospace';
+      ctx.fillText('SETAS/C/1-7 P/ TROCAR', 82, 121);
+      // bolinhas das roupas
+      OUTFITS.forEach((oo, k) => {
+        ctx.fillStyle = oo.r; ctx.beginPath(); ctx.arc(86 + k * 14, 138, 4, 0, 7); ctx.fill();
+        ctx.strokeStyle = k === outfitIdx ? '#f8d838' : '#fff'; ctx.lineWidth = 1; ctx.stroke();
+      });
+    } catch (e) {}
+    if ((Game.frame >> 5) & 1) centerText('PRESSIONE ENTER / TOQUE P/ JOGAR', 152, '#fff');
+    centerText('Z:CORRER/ATIRAR  X:PULAR  SETAS:MOVER', 164, '#fff');
+    centerText('C:TROCAR ROUPA  TOP-' + pad(Game.best || 0, 6), 176, '#fff');
+    centerText('TOQUE NOS BOTOES ABAIXO P/ TROCAR', 188, '#f8d838');
     drawHUD();
     return;
   }
